@@ -1,0 +1,33 @@
+from PIL import ImageTk, Image
+import numpy as np
+import math
+import os
+import sys
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(os.path.join(current_dir, 'robotiq'))
+from utils.UR_Functions import URfunctions as URControl
+from robotiq.robotiq_gripper import RobotiqGripper
+
+position1 = [1.7400548458099365, -1.1608061355403443, 1.7440245787249964, -2.111642976800436, -1.5583680311786097, 0.16877156496047974]
+position2 = [1.7400548458099365, -1.1608061355403443, 1.7440245787249964, -2.111642976800436, -1.5583680311786097, 0.16877156496047974]
+position3 = [1.4218416213989258, -1.7318431339659632, 1.8785865942584437, -1.6746508083739222, -1.570390526448385, -0.15210038820375615]
+position4= [1.4134132862091064, -1.6584435902037562, 2.053028408681051, -1.9225331745543421, -1.571334187184469, -0.1592949072467249]
+
+def main():
+    robot = URControl(ip="192.168.0.2", port=30003)
+    gripper=RobotiqGripper()
+    gripper.connect("192.168.0.2", 63352)
+    gripper.move(0,125,125)
+
+    
+    robot.move_joint_list(position1, 0.25, 0.5, 0.02)
+    position1 = degreestorad([-5.61,-83.95,112.70,-119.79,-90.07,-5.48])
+    
+def degreestorad(list):
+     for i in range(6):
+          list[i]=list[i]*(math.pi/180)
+     return(list)    
+ 
+
+if __name__=="__main__":
+     main()
