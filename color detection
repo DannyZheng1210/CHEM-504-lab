@@ -2,90 +2,108 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 import time
- 
-# Define color ranges in HSV color space
-LOWER_BLUE = np.array([90, 50, 50])
-UPPER_BLUE = np.array([130, 255, 255])
- 
-LOWER_COLORLESS = np.array([0, 0, 200])  
-UPPER_COLORLESS = np.array([180, 50, 255])
- 
-# Set the size of the detection region (ROI)
-ROI_SIZE = 100  # 100x100 pixels
- 
-# Open the camera
-cap = cv2.VideoCapture(0)
- 
-# Lists to store color change data
-time_list = []
-blue_ratio_list = []
-colorless_ratio_list = []
- 
-start_time = time.time()
- 
-while True:
-    ret, frame = cap.read()
-    if not ret:
-        print("Failed to capture frame")
-        break
- 
-    # Get image dimensions
-    h, w, _ = frame.shape
-    # Calculate center coordinates of the image
-    x_center, y_center = w // 2, h // 2
-    x1, y1 = x_center - ROI_SIZE // 2, y_center - ROI_SIZE // 2
-    x2, y2 = x_center + ROI_SIZE // 2, y_center + ROI_SIZE // 2
- 
-    # Extract the center region (ROI)
-    roi = frame[y1:y2, x1:x2]
- 
-    # Convert ROI to HSV color space
-    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
- 
-    # Perform color detection (Blue & Colorless)
-    blue_mask = cv2.inRange(hsv, LOWER_BLUE, UPPER_BLUE)
-    colorless_mask = cv2.inRange(hsv, LOWER_COLORLESS, UPPER_COLORLESS)
- 
-    # Compute the proportion of detected colors in the ROI
-    blue_ratio = np.sum(blue_mask > 0) / blue_mask.size
-    colorless_ratio = np.sum(colorless_mask > 0) / colorless_mask.size
- 
-    # Record elapsed time and color ratios
-    elapsed_time = time.time() - start_time
-    time_list.append(elapsed_time)
-    blue_ratio_list.append(blue_ratio)
-    colorless_ratio_list.append(colorless_ratio)
- 
-    # Determine the color status
-    if blue_ratio > 0.05:
-        color_status = "Blue (Oxidized)"
-    elif colorless_ratio > 0.05:
-        color_status = "Colorless (Reduced)"
-    else:
-        color_status = "Transitioning"
- 
-    # Draw a green rectangle to indicate the detection area on the original frame
-    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-    cv2.putText(frame, f"Status: {color_status}", (20, 50),
-                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-    # Display the detection results
-    cv2.imshow("Color Detection", frame)
-    cv2.imshow("ROI", roi)  # Show the analyzed region
- 
-    # Press 'q' to exit
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
- 
-cap.release()
-cv2.destroyAllWindows()
- 
-# Plot color change graph
-plt.figure(figsize=(8, 5))
-plt.plot(time_list, blue_ratio_list, label="Blue Ratio", color="blue")
-plt.plot(time_list, colorless_ratio_list, label="Colorless Ratio", color="gray")
-plt.xlabel("Time (s)")
-plt.ylabel("Color Ratio")
-plt.title("Color Change Over Time")
-plt.legend()
-plt.grid(True)
-plt.show()
+import pandas as pd
+import datetime
+
+class ColourDetection:
+    LOWER_BLUE = np.array([100, 150, 50])
+    UPPER_BLUE = np.array([140, 255, 255])
+   
+    ROI_SIZE = 100  # 100x100 pixels
+   
+    def __init__(self):
+        self.cap = cv2.VideoCapture(0)
+        self.time_list = []
+        self.blue_ratio_list = []
+
+    def get_timestamp(self):
+        return datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    def compute_weighted_blue_ratio(self, hsv):
+        mask = cv2.inRange(hsv, self.LOWER_BLUE, self.UPPER_BLUE)
+        
+        # get H, S, V values
+        H, S, V = cv2.split(hsv)
+        
+        # the values mainly changed are S and V
+        S_blue = S[mask > 0]  
+        V_blue = V[mask > 0]  
+        
+        if len(S_blue) == 0:  
+            return 0
+
+        # calculate the weighted blue ratio
+        blue_ratio = np.sum(S_blue * V_blue) / (np.sum(S) * np.sum(V))  
+        return blue_ratio
+
+    def capture(self):
+        start_time = time.time()
+
+        while True:
+            ret, frame = self.cap.read()
+            if not ret:
+                print("Failed to capture frame")
+                break
+
+            h, w, _ = frame.shape
+            x_center, y_center = w // 2, h // 2
+            x1, y1 = x_center - self.ROI_SIZE // 2, y_center - self.ROI_SIZE // 2
+            x2, y2 = x_center + self.ROI_SIZE // 2, y_center + self.ROI_SIZE // 2
+
+            roi = frame[y1:y2, x1:x2]
+            hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+
+            # calculate the weighted blue ratio
+            weighted_blue_ratio = self.compute_weighted_blue_ratio(hsv)
+
+            elapsed_time = time.time() - start_time
+            self.time_list.append(elapsed_time)
+            self.blue_ratio_list.append(weighted_blue_ratio)
+
+            colour_status = "Blue (Oxidized)" if weighted_blue_ratio > 0.05 else "Transitioning"
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.putText(frame, f"Status: {colour_status}", (20, 50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+            cv2.imshow("Color Detection", frame)
+            cv2.imshow("ROI", roi)
+
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+
+        self.cap.release()
+        cv2.destroyAllWindows()
+        self.save_to_csv()
+
+    def save_to_csv(self):
+        timestamp = self.get_timestamp()
+        file_path = f"color_detection_{timestamp}.csv"
+
+        data = {
+            "Time (s)": self.time_list,
+            "Weighted Blue Ratio": self.blue_ratio_list
+        }
+        df = pd.DataFrame(data)
+        df.to_csv(file_path, index=False)
+
+        print(f"Data saved to {file_path}")
+
+    def plot_graph(self):
+        timestamp = self.get_timestamp()
+        image_path = f"Figure_{timestamp}.png"
+
+        plt.figure(figsize=(8, 5))
+        plt.plot(self.time_list, self.blue_ratio_list, label="Weighted Blue Ratio", color="blue")
+        plt.xlabel("Time (s)")
+        plt.ylabel("Weighted Blue Ratio")
+        plt.title("Colour Change Over Time")
+        plt.legend()
+        plt.grid(True)
+        plt.savefig(image_path)
+        plt.show()
+
+        print(f"Graph saved to {image_path}")
+
+colour_detection = ColourDetection()
+colour_detection.capture()
+colour_detection.plot_graph()
