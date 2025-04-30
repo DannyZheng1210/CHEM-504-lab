@@ -2,56 +2,26 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 import time
+import pandas as pd
 import datetime
 import os
 
-class VideoColorAnalysisSystem:
+class ColourDetection:
     def __init__(self):
-        # Initialize webcam input
         self.cap = cv2.VideoCapture(0)
-        if not self.cap.isOpened():
-            raise ValueError("Cannot open webcam")
+        self.time_list = []
+        self.rgb_list = []
 
-        # Get video parameters
-        self.fps = self.cap.get(cv2.CAP_PROP_FPS)
-        if self.fps == 0 or np.isnan(self.fps):
-            self.fps = 30  # default FPS
-        self.width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        self.height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-        # Initialize ROI (region of interest) parameters
-        self.ROI_WIDTH = 50
-        self.ROI_HEIGHT = 50
-        self.roi_top_left = [100, 100]
+        self.ROI_WIDTH = 100
+        self.ROI_HEIGHT = 100
+        self.roi_top_left = [100, 100]  # Modify this manually as needed
         self.dragging = False
 
-        # Optional HSV mask range for blue detection
-        self.lower_blue = np.array([90, 50, 50])
-        self.upper_blue = np.array([130, 255, 255])
+        # Setup output folder
+        os.makedirs("colour_detection_values", exist_ok=True)
+        os.makedirs("colour_detection_graph", exist_ok=True)
 
-        # Storage for time and RGB data
-        self.time_data = []
-        self.rgb_data = {'R': [], 'G': [], 'B': []}
-        self.start_time = time.time()
-
-        # Setup output directory and CSV file for data logging
-        self.output_dir = "analysis_results"
-        os.makedirs(self.output_dir, exist_ok=True)
-        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-        self.data_file = open(os.path.join(self.output_dir, f"rgb_data_{timestamp}.csv"), "w")
-        self.data_file.write("Time(s),Red,Green,Blue\n")
-
-        # Setup GUI windows and plotting figure
-        self.setup_visualization()
-        cv2.setMouseCallback("Main View", self.mouse_callback)
-
-    def setup_visualization(self):
-        """Setup OpenCV windows and Matplotlib figure."""
-        cv2.namedWindow("Main View", cv2.WINDOW_NORMAL)
-        cv2.namedWindow("ROI View", cv2.WINDOW_NORMAL)
-        cv2.resizeWindow("Main View", 800, 600)
-        cv2.resizeWindow("ROI View", 400, 300)
-
+        # Setup plot
         plt.ion()
         self.fig, self.ax = plt.subplots(figsize=(10, 6))
         self.lines = {
@@ -59,16 +29,18 @@ class VideoColorAnalysisSystem:
             'G': self.ax.plot([], [], 'g-', label='Green')[0],
             'B': self.ax.plot([], [], 'b-', label='Blue')[0]
         }
-        self.ax.set_title("Real-time RGB Channels Intensity")
+        self.ax.set_title("RGB Average in ROI")
         self.ax.set_xlabel("Time (s)")
-        self.ax.set_ylabel("Intensity (0-255)")
+        self.ax.set_ylabel("Intensity")
         self.ax.set_xlim(0, 10)
         self.ax.set_ylim(0, 255)
         self.ax.legend()
         self.ax.grid(True)
 
+    def get_timestamp(self):
+        return datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
     def mouse_callback(self, event, x, y, flags, param):
-        """Handle mouse events to allow dragging of ROI."""
         if event == cv2.EVENT_LBUTTONDOWN:
             x1, y1 = self.roi_top_left
             x2, y2 = x1 + self.ROI_WIDTH, y1 + self.ROI_HEIGHT
@@ -78,79 +50,83 @@ class VideoColorAnalysisSystem:
 
         elif event == cv2.EVENT_MOUSEMOVE and self.dragging:
             dx, dy = self.mouse_offset
-            new_x = max(0, min(self.width - self.ROI_WIDTH, x - dx))
-            new_y = max(0, min(self.height - self.ROI_HEIGHT, y - dy))
+            new_x = max(0, min(int(self.cap.get(3)) - self.ROI_WIDTH, x - dx))
+            new_y = max(0, min(int(self.cap.get(4)) - self.ROI_HEIGHT, y - dy))
             self.roi_top_left = [new_x, new_y]
 
         elif event == cv2.EVENT_LBUTTONUP:
             self.dragging = False
 
-    def process_frame(self, frame):
-        """Extract ROI and compute average RGB values. Optional: apply blue mask."""
-        x1, y1 = self.roi_top_left
-        x2, y2 = x1 + self.ROI_WIDTH, y1 + self.ROI_HEIGHT
-        roi = frame[y1:y2, x1:x2]
+    def capture(self):
+        start_time = time.time()
+        cv2.namedWindow("Color Detection")
+        cv2.namedWindow("ROI")
+        cv2.setMouseCallback("Color Detection", self.mouse_callback)
 
-        # If you want to use a blue color mask in HSV, uncomment below:
-        # hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-        # mask = cv2.inRange(hsv, self.lower_blue, self.upper_blue)
-        # masked_roi = cv2.bitwise_and(roi, roi, mask=mask)
-        # b, g, r, _ = cv2.mean(roi, mask=mask)
+        while True:
+            ret, frame = self.cap.read()
+            if not ret:
+                break
 
-        # Default behavior: compute mean RGB without masking
-        b, g, r, _ = cv2.mean(roi)
+            x1, y1 = self.roi_top_left
+            x2, y2 = x1 + self.ROI_WIDTH, y1 + self.ROI_HEIGHT
+            roi = frame[y1:y2, x1:x2]
 
-        cv2.rectangle(frame, (x1, y1), (x2, y2), (0,255,0), 2)
-        cv2.putText(frame, f"R:{int(r)} G:{int(g)} B:{int(b)}", (30,60),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,255), 2)
+            # Calculate mean RGB values of ROI
+            b, g, r, _ = cv2.mean(roi)
+            elapsed_time = time.time() - start_time
+            self.time_list.append(elapsed_time)
+            self.rgb_list.append((r, g, b))
 
-        return frame, roi, (r, g, b)
+            # Draw ROI rectangle and info
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.putText(frame, f"R:{int(r)} G:{int(g)} B:{int(b)}", (30, 50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+            cv2.putText(frame, f"ROI Pos: ({x1}, {y1})", (30, 90),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
 
-    def update_visualization(self, frame, roi, rgb_values):
-        """Display frames and update RGB plot in real-time."""
-        main_display = cv2.resize(frame, (800, 600))
-        roi_display = cv2.resize(roi, (400, 300))
+            cv2.imshow("Color Detection", frame)
+            cv2.imshow("ROI", roi)
 
-        cv2.imshow("Main View", main_display)
-        cv2.imshow("ROI View", roi_display)
+            # Update plot
+            for i, ch in enumerate(['R', 'G', 'B']):
+                self.lines[ch].set_data(self.time_list, [v[i] for v in self.rgb_list])
 
-        current_time = time.time() - self.start_time
-        self.time_data.append(current_time)
-        for i, channel in enumerate(['R', 'G', 'B']):
-            self.rgb_data[channel].append(rgb_values[i])
-            self.lines[channel].set_data(self.time_data, self.rgb_data[channel])
+            self.ax.set_xlim(0, max(10, elapsed_time))
+            self.fig.canvas.draw()
+            self.fig.canvas.flush_events()
 
-        self.ax.set_xlim(0, max(10, current_time))
-        self.fig.canvas.draw()
-        self.fig.canvas.flush_events()
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+            if elapsed_time > 30:
+                break
 
-        # Log RGB values to CSV
-        self.data_file.write(f"{current_time:.2f},{rgb_values[0]:.1f},{rgb_values[1]:.1f},{rgb_values[2]:.1f}\n")
+        # Save final frame as image before releasing the camera
+        timestamp = self.get_timestamp()
+        image_path = f"colour_detection_values/final_frame_{timestamp}.png"
+        cv2.imwrite(image_path, frame)
 
-    def run_analysis(self):
-        """Main loop: capture, process, and visualize frames."""
-        try:
-            while self.cap.isOpened():
-                ret, frame = self.cap.read()
-                if not ret:
-                    break
-                processed_frame, roi, rgb = self.process_frame(frame)
-                self.update_visualization(processed_frame, roi, rgb)
-
-                if cv2.waitKey(int(1000/self.fps)) & 0xFF == ord('q'):
-                    break
-        finally:
-            self.cleanup()
-
-    def cleanup(self):
-        """Release resources and save final plot."""
         self.cap.release()
-        self.data_file.close()
         cv2.destroyAllWindows()
-        plt.ioff()
-        plt.savefig(os.path.join(self.output_dir, "final_rgb_plot.png"), dpi=300)
-        print(f"Analysis complete. Results saved in '{self.output_dir}'.")
+        self.save_to_csv()
+        self.save_plot()
 
-if __name__ == "__main__":
-    analyzer = VideoColorAnalysisSystem()
-    analyzer.run_analysis()
+    def save_to_csv(self):
+        timestamp = self.get_timestamp()
+        path = f"colour_detection_values/color_detection_{timestamp}.csv"
+        df = pd.DataFrame({
+            "Time (s)": self.time_list,
+            "Red": [v[0] for v in self.rgb_list],
+            "Green": [v[1] for v in self.rgb_list],
+            "Blue": [v[2] for v in self.rgb_list],
+        })
+        df.to_csv(path, index=False)
+
+    def save_plot(self):
+        timestamp = self.get_timestamp()
+        path = f"colour_detection_graph/Figure_{timestamp}.png"
+        plt.ioff()
+        plt.savefig(path, dpi=300)
+
+if __name__ == '__main__':
+    ColourDetection().capture()
